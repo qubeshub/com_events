@@ -25,66 +25,49 @@
  * HUBzero is a registered trademark of Purdue University.
  *
  * @package   hubzero-cms
- * @author	Kevin Wojkovich <kevinw@purdue.edu>
+ * @author    Patrick Mulligan <jpmulligan@purdue.edu>
  * @copyright Copyright 2005-2015 HUBzero Foundation, LLC.
  * @license   http://opensource.org/licenses/MIT MIT
- * @since	 Class available since release 1.3.2
  */
 
-namespace Components\Events\Models\Orm;
+namespace Components\Events\Models;
 
-use Hubzero\Database\Relational;
+use Hubzero\Utility\Date;
 
-/**
- * Hubs database model
- *
- * @uses \Hubzero\Database\Relational
- */
-class Event extends Relational
+class EventDate extends Date
 {
 	/**
-	 * The table namespace
+	 * Same method as parent Date. I had to explicitly include this since the parent returns self,
+	 * therefore wouldn't actually instantiate the EventDate object.
 	 *
-	 * @var string
-	 **/
-	protected $namespace = '';
-
-	/**
-	 * Default order by for model
-	 *
-	 * @var string
-	 **/
-	public $orderBy = 'id';
-
-	/**
-	 * Fields and their validation criteria
-	 *
-	 * @var array
-	 **/
-	protected $rules = array(
-		'title' => 'notempty'
-	);
-
-	/**
-	 * Automatically fillable fields
-	 *
-	 * @var array
-	 **/
-	public $always = array(
-	);
-
-	/**
-	 * Gets latest event
-	 *
-	 * @param   integer  $limit
-	 * @param   string   $dateField
-	 * @param   string   $sort
+	 * @param   string  $date  String in a format accepted by strtotime(), defaults to "now".
+	 * @param   mixed   $tz    Time zone to be used for the date.
 	 * @return  object
 	 */
-	public static function getLatest($limit = 10, $dateField = 'created', $sort = 'DESC')
+	public static function of($date = 'now', $tz = null)
 	{
-		$rows = self::all()->where('scope', '=', 'event')->where('state', '=', '1')->order($dateField, $sort)->limit($limit);
+		return new self($date, $tz);
+	}
 
-		return $rows;
+	/**
+	 * Function to explicitly convert a date to the timezone and format provided.
+	 * @param   mixed  $timezone The numeric key on the Date static offsets array (a short list of common timezones) 
+	 * 		or a timezone string accepted by the TimeZone PHP object (see {@link PHP_MANUAL#timezones})
+	 * @param   string  $format  The date format specification string (see {@link PHP_MANUAL#date})
+	 * @return  string
+	 */
+	public function toTimezone($timezone, $format = null)
+	{
+		$format = $format ?: parent::$format;
+		if (!($timezone instanceof DateTimeZone))
+		{
+			if (is_numeric($timezone))
+			{
+				$timezone = parent::$offsets[(string) $timezone];
+			}
+		}
+
+		$this->setTimezone($timezone);
+		return $this->format($format, true);
 	}
 }
