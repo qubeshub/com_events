@@ -25,54 +25,99 @@
  * HUBzero is a registered trademark of Purdue University.
  *
  * @package   hubzero-cms
+ * @author    Christopher Smoak <csmoak@purdue.edu>
  * @copyright Copyright 2005-2015 HUBzero Foundation, LLC.
  * @license   http://opensource.org/licenses/MIT MIT
  */
 
-namespace Components\Events\Models\Orm;
+namespace Components\Events\Models\Calendar;
 
-use Hubzero\Database\Relational;
-use User;
+use Components\Events\Models\Calendar;
+use Components\Events\Tables;
+use Hubzero\Base\Model\ItemList;
+use Hubzero\Base\Model;
+use DateTimezone;
+use DateTime;
 use Date;
 
+// include calendar model
+require_once dirname(__DIR__) . DS . 'calendar.php';
+
 /**
- * Event Calendar model
- *
- * @uses \Hubzero\Database\Relational
+ * Calendar archive model
  */
-class Calendar extends Relational
+class Archive extends Model
 {
 	/**
-	 * The table namespace
+	 * \Hubzero\Base\ItemList
 	 *
-	 * @var string
-	 **/
-	protected $namespace = 'events';
-
-	/**
-	 * Default order by for model
-	 *
-	 * @var string
-	 **/
-	public $orderBy = 'id';
-
-	/**
-	 * Fields and their validation criteria
-	 *
-	 * @var array
-	 **/
-	protected $rules = array(
-		'title' => 'notempty'
-	);
-
-	/**
-	 * Defines a one to many relationship between calendar and events
-	 *
-	 * @return  object
+	 * @var object
 	 */
-	public function events()
+	private $_calendars = null;
+
+	/**
+	 * Constructor
+	 *
+	 * @param      mixed     Object Id
+	 * @return     void
+	 */
+	public function __construct()
 	{
-		return $this->oneToMany(__NAMESPACE__ . '\Event', 'calendar_id');
+		// create needed objects
+		$this->_db = \App::get('db');
+	}
+
+	/**
+	 * Get Instance this Model
+	 *
+	 * @param   $key   Instance Key
+	 */
+	static function &getInstance($key=null)
+	{
+		static $instances;
+
+		if (!isset($instances))
+		{
+			$instances = array();
+		}
+
+		if (!isset($instances[$key]))
+		{
+			$instances[$key] = new self();
+		}
+
+		return $instances[$key];
+	}
+
+	/**
+	 * Get a list of event calendars
+	 *
+	 * @param      string  $rtrn    What data to return
+	 * @param      array   $filters Filters to apply to data retrieval
+	 * @param      boolean $clear Clear cached data?
+	 * @return     mixed
+	 */
+	public function calendars( $rtrn = 'list', $filters = array(), $clear = false )
+	{
+		switch (strtolower($rtrn))
+		{
+			case 'list':
+			default:
+				if (!($this->_calendars instanceof ItemList) || $clear)
+				{
+					$tbl = new Tables\Calendar($this->_db);
+					if ($results = $tbl->find( $filters ))
+					{
+						foreach ($results as $key => $result)
+						{
+							$results[$key] = new Calendar($result);
+						}
+					}
+					$this->_calendars = new ItemList($results);
+				}
+				return $this->_calendars;
+			break;
+		}
 	}
 
 	/**
@@ -80,23 +125,23 @@ class Calendar extends Relational
 	 *
 	 * @param   string   $name
 	 * @param   string   $scope
-	 * @param   integer  $scope_id
+	 * @param   unknown  $scope_id
 	 * @return  void
 	 */
-	public static function subscribe($name = 'Calendar Subscription', $scope = 'event', $scope_id = null)
+	public function subscribe($name = 'Calendar Subscription', $scope = 'event', $scope_id = null)
 	{
 		// get request varse
-		$calendarIds = \Request::getString('calendar_id', '', 'get');
+		$calendarIds = Request::getString('calendar_id', '', 'get');
 		$calendarIds = array_map("intval", explode(',', $calendarIds));
 
 		// array to hold events
-		$events = array();
+		$events = new ItemList();
 
 		// loop through and get each calendar
 		foreach ($calendarIds as $k => $calendarId)
 		{
 			// load calendar model
-			$eventsCalendar = self::one($calendarId);
+			$eventsCalendar = new Calendar($calendarId);
 
 			// make sure calendar is published
 			if (!$eventsCalendar->get('published') && $calendarId != 0)
@@ -105,17 +150,15 @@ class Calendar extends Relational
 			}
 
 			// get calendar events
-			$rawEvents = $eventsCalendar->events()
-				->whereEquals('scope', $scope)
-				->whereEquals('scope_id', $scope_id)
-				->whereIn('state', array(1))
-				->rows();
+			$rawEvents = $eventsCalendar->events('list', array(
+				'scope'       => $scope,
+				'scope_id'    => $scope_id,
+				'calendar_id' => $calendarId,
+				'state'       => array(1)
+			));
 
 			// merge with full events list
-			foreach ($rawEvents as $rawEvent)
-			{
-				$events[] = $rawEvent;
-			}
+			$events = $events->merge($rawEvents);
 		}
 
 		//create output
@@ -130,13 +173,11 @@ class Calendar extends Relational
 
 		// get daylight start and end
 		$ttz = new DateTimezone(timezone_name_from_abbr('EST'));
-
 		$first = Date::of(date('Y') . '-01-02 00:00:00')->toUnix();
-		$last  = Date::of(date('Y') . '-12-30 00:00:00')->toUnix();
-
+		$last = Date::of(date('Y') . '-12-30 00:00:00')->toUnix();
 		$transitions = $ttz->getTransitions($first, $last);
 		$daylightStart = Date::of($transitions[1]['ts']);
-		$daylightEnd   = Date::of($transitions[2]['ts']);
+		$daylightEnd = Date::of($transitions[2]['ts']);
 
 		// loop through events
 		foreach ($events as $event)
@@ -146,7 +187,7 @@ class Calendar extends Relational
 			$title    = $event->get('title');
 			$content  = str_replace("\r\n", '\n', $event->get('content'));
 			$location = $event->get('adresse_info');
-			$url      = $event->get('extra_info');
+			$url  	  = $event->get('extra_info');
 			$allDay   = $event->get('allday');
 
 			// get event timezone setting
@@ -155,17 +196,17 @@ class Calendar extends Relational
 			$tzName = timezone_name_from_abbr($tzInfo['abbreviation']);
 
 			// get publish up/down dates in UTC
-			$publishUp   = Date::of($event->get('publish_up'));
+			$publishUp = Date::of($event->get('publish_up'));
 			$publishDown = Date::of($event->get('publish_down'));
-			if ($allDay == '1')
+			if ($allDay == "1")
 			{
 				$dtStart = 'DTSTART;VALUE=DATE:' . $publishUp->format('Ymd', true);
-				$dtEnd   = 'DTEND;VALUE=DATE:' . $publishDown->format('Ymd', true);
+				$dtEnd = 'DTEND;VALUE=DATE:' . $publishDown->format('Ymd', true);
 			}
 			else
 			{
 				$dtStart = 'DTSTART:' . $publishUp->format('Ymd\THis\Z');
-				$dtEnd   = 'DTEND:' . $publishDown->format('Ymd\THis\Z');
+				$dtEnd = 'DTEND:' . $publishDown->format('Ymd\THis\Z');
 			}
 
 			/* 2017-04-11 Patrick: This is actually no longer true, therefore the best course of action would be to add the UTC datetime (adding a Z as a suffix)
